@@ -116,7 +116,7 @@ class TestDeepSeekAI:
         ds1 = get_deepseek()
         ds2 = get_deepseek()
         assert ds1 is ds2
-        assert ds1.is_configured()
+        # is_configured 取决于环境变量 DEEPSEEK_API_KEY 是否设置
 
 
 class TestLLMParser:
@@ -140,7 +140,8 @@ class TestLLMParser:
         }
         mock_response = {"choices": [{"message": {"content": json.dumps(mock_parsed)}}]}
 
-        with patch("requests.post") as mock_post:
+        with patch.object(ds, "is_configured", return_value=True), \
+             patch("requests.post") as mock_post:
             mock_post.return_value = Mock(status_code=200, json=lambda: mock_response)
             result = parse_medical_text_with_llm("狗叫旺财")
             assert result.get("engine") == "deepseek"
