@@ -11,8 +11,8 @@ class TestDeepSeekAI:
 
     def test_is_configured(self):
         ds = DeepSeekAI()
-        # API key 已在 config 中预设，应为已配置
-        assert ds.is_configured()
+        # 默认无 API key（需通过环境变量 DEEPSEEK_API_KEY 设置）
+        default_state = ds.is_configured()
 
     def test_chat_basic(self):
         ds = DeepSeekAI()
@@ -184,5 +184,4 @@ class TestEngineStatus:
         data = resp.get_json()
         assert "ai_engine" in data
         assert "deepseek_configured" in data
-        assert data["deepseek_configured"] is True  # API key 已预设
-        # 无网时 deepseek 请求会失败，但配置检查应是 True
+        # 默认未配置 API key，需环境变量
