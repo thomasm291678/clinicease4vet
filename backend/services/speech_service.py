@@ -10,8 +10,8 @@ API: 实时语音转写 WebSocket
 支持语种: zh_cn (中文普通话)
 
 使用方式:
-  1. 设置环境变量: IFLYTEK_APP_ID / IFLYTEK_API_KEY / IFLYTEK_API_SECRET
-  2. 如未设置，自动回退到本地 Google STT 或手动输入
+  1. 设置 IFLYTEK_APP_ID / IFLYTEK_API_KEY / IFLYTEK_API_SECRET
+  2. 讯飞 RTASR WebSocket 实时转写
 """
 
 import hashlib
@@ -65,10 +65,7 @@ class IflytekTranscriber:
         if not audio_data:
             return ""
 
-        if self.is_configured():
-            return self._transcribe_rtasr(audio_data, language)
-        else:
-            return self._transcribe_local(audio_data)
+        return self._transcribe_rtasr(audio_data, language)
 
     def transcribe_file(self, file_path: str) -> str:
         try:
@@ -194,33 +191,6 @@ class IflytekTranscriber:
         )
         return url
 
-    # ---------- 离线回退 ----------
-
-    def _transcribe_local(self, audio_data: bytes) -> str:
-        try:
-            import speech_recognition as sr
-            import io
-            import wave
-
-            r = sr.Recognizer()
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(16000)
-                wf.writeframes(audio_data)
-            buf.seek(0)
-
-            with sr.AudioFile(buf) as source:
-                audio = r.record(source)
-
-            return r.recognize_google(audio, language="zh-CN")
-
-        except ImportError:
-            return "[回退] Google STT 不可用，请手动输入"
-        except Exception as e:
-            return f"[回退] 语音识别失败: {e}，请手动输入"
-
     @staticmethod
     def _restore_punctuation(text: str) -> str:
         if not text:
@@ -229,24 +199,3 @@ class IflytekTranscriber:
         if text[-1] not in "。！？，、.!?,":
             text += "。"
         return text
-
-
-def record_and_transcribe(duration: int = 10) -> str:
-    """客户端录音 + 转写"""
-    transcriber = IflytekTranscriber()
-    try:
-        import speech_recognition as sr
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            r.adjust_for_ambient_noise(source, duration=0.5)
-            audio = r.listen(source, timeout=5, phrase_time_limit=duration)
-        pcm = audio.get_raw_data(convert_rate=16000, convert_width=2)
-        if transcriber.is_configured():
-            return transcriber.transcribe(pcm)
-        return r.recognize_google(audio, language="zh-CN")
-    except ImportError:
-        return input("\n[回退] 语音库未安装，请直接输入: ").strip()
-    except OSError:
-        return input("\n[回退] 未检测到麦克风，请直接输入: ").strip()
-    except Exception as e:
-        return input(f"\n[回退] 录音失败 ({e})，请直接输入: ").strip()

@@ -29,7 +29,7 @@ def list_vaccinations():
         )
     elif pet_id:
         cursor.execute(
-            """SELECT vr.*, p.name AS pet_name, p.species
+            """SELECT vr.*, p.name AS pet_name, p.species, p.owner_name
                FROM vaccination_records vr
                JOIN pet_details p ON vr.pet_id = p.id
                WHERE vr.pet_id = %s
@@ -38,7 +38,7 @@ def list_vaccinations():
         )
     else:
         cursor.execute(
-            """SELECT vr.*, p.name AS pet_name, p.species
+            """SELECT vr.*, p.name AS pet_name, p.species, p.owner_name
                FROM vaccination_records vr
                JOIN pet_details p ON vr.pet_id = p.id
                ORDER BY vr.administered_date DESC"""

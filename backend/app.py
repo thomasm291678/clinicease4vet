@@ -10,6 +10,7 @@ from routes.medical_routes import medical_bp
 from routes.vaccination_routes import vaccine_bp
 from routes.drug_routes import drug_bp
 from routes.ai_routes import ai_bp
+from routes.soap_routes import soap_bp
 
 
 def create_app() -> Flask:
@@ -23,6 +24,7 @@ def create_app() -> Flask:
     app.register_blueprint(vaccine_bp)
     app.register_blueprint(drug_bp)
     app.register_blueprint(ai_bp)
+    app.register_blueprint(soap_bp)
 
     # 全局错误处理
     @app.errorhandler(404)

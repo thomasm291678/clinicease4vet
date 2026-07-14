@@ -88,7 +88,7 @@ def init_database():
         role VARCHAR(20) DEFAULT 'staff'
     )""")
 
-    # ---------- 诊疗记录表 ----------
+    # ---------- 诊疗记录表 (含 SOAP 扩展字段) ----------
     cursor.execute("""CREATE TABLE IF NOT EXISTS medical_records (
         id INT AUTO_INCREMENT PRIMARY KEY,
         pet_id INT NOT NULL,
@@ -96,11 +96,34 @@ def init_database():
         visit_date DATE NOT NULL,
         diagnosis TEXT,
         treatment TEXT,
+        symptoms TEXT,
+        subjective TEXT,
+        objective TEXT,
+        assessment TEXT,
+        plan TEXT,
+        clinical_reasoning_data JSON,
         notes TEXT,
         follow_up_date DATE,
         fee_charged INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (pet_id) REFERENCES pet_details(id) ON DELETE CASCADE
+    )""")
+
+    # ---------- 临床推理表 ----------
+    cursor.execute("""CREATE TABLE IF NOT EXISTS clinical_reasoning (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        record_id INT NOT NULL,
+        problem_list JSON,
+        reasoning_path TEXT,
+        differential_list JSON,
+        must_not_miss JSON,
+        missing_info TEXT,
+        recommended_tests JSON,
+        dynamic_questions TEXT,
+        client_communication JSON,
+        summary TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (record_id) REFERENCES medical_records(id) ON DELETE CASCADE
     )""")
 
     # ---------- 疫苗接种记录表 ----------

@@ -18,20 +18,28 @@ def list_pets():
     conn = get_connection()
     cursor = conn.cursor()
 
-    query = "SELECT * FROM pet_details WHERE 1=1"
+    query = """
+        SELECT p.*,
+            (SELECT id FROM medical_records WHERE pet_id = p.id ORDER BY visit_date DESC LIMIT 1) AS recent_record_id,
+            (SELECT diagnosis FROM medical_records WHERE pet_id = p.id ORDER BY visit_date DESC LIMIT 1) AS recent_diagnosis,
+            (SELECT treatment FROM medical_records WHERE pet_id = p.id ORDER BY visit_date DESC LIMIT 1) AS recent_treatment,
+            (SELECT visit_date FROM medical_records WHERE pet_id = p.id ORDER BY visit_date DESC LIMIT 1) AS recent_visit_date,
+            (SELECT COUNT(*) FROM medical_records WHERE pet_id = p.id) AS total_visits
+        FROM pet_details p WHERE 1=1
+    """
     params = []
 
     if species:
-        query += " AND species = %s"
+        query += " AND p.species = %s"
         params.append(species)
     if owner:
-        query += " AND owner_name LIKE %s"
+        query += " AND p.owner_name LIKE %s"
         params.append(f"%{owner}%")
     if search:
-        query += " AND (name LIKE %s OR breed LIKE %s OR owner_name LIKE %s)"
+        query += " AND (p.name LIKE %s OR p.breed LIKE %s OR p.owner_name LIKE %s)"
         params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
 
-    query += " ORDER BY id DESC"
+    query += " ORDER BY p.id DESC"
     cursor.execute(query, params)
     rows = cursor.fetchall()
     columns = [desc[0] for desc in cursor.description]

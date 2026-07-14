@@ -73,14 +73,20 @@ def add_record():
 
     try:
         cursor.execute(
-            """INSERT INTO medical_records (pet_id, vet_name, visit_date, diagnosis, treatment, notes, follow_up_date, fee_charged)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            """INSERT INTO medical_records (pet_id, vet_name, visit_date, diagnosis, treatment, symptoms,
+               subjective, objective, assessment, plan, notes, follow_up_date, fee_charged)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 pet_id,
                 data.get("vet_name", ""),
                 visit_date,
                 diagnosis,
                 data.get("treatment", ""),
+                data.get("symptoms", ""),
+                data.get("subjective", ""),
+                data.get("objective", ""),
+                data.get("assessment", diagnosis),
+                data.get("plan", ""),
                 data.get("notes", ""),
                 data.get("follow_up_date") or None,
                 int(data.get("fee_charged", 0)),
@@ -115,12 +121,18 @@ def update_record(record_id):
     try:
         cursor.execute(
             """UPDATE medical_records SET vet_name=%s, visit_date=%s, diagnosis=%s,
-               treatment=%s, notes=%s, follow_up_date=%s, fee_charged=%s WHERE id=%s""",
+               treatment=%s, symptoms=%s, subjective=%s, objective=%s,
+               assessment=%s, plan=%s, notes=%s, follow_up_date=%s, fee_charged=%s WHERE id=%s""",
             (
                 data.get("vet_name", ""),
                 data.get("visit_date", ""),
                 data.get("diagnosis", ""),
                 data.get("treatment", ""),
+                data.get("symptoms", ""),
+                data.get("subjective", ""),
+                data.get("objective", ""),
+                data.get("assessment", data.get("diagnosis", "")),
+                data.get("plan", ""),
                 data.get("notes", ""),
                 data.get("follow_up_date") or None,
                 int(data.get("fee_charged", 0)),
