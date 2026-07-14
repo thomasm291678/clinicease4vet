@@ -27,7 +27,7 @@ class DeepSeekAI:
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_key != "")
 
-    def _chat(self, system_prompt: str, user_message: str) -> str:
+    def _chat(self, system_prompt: str, user_message: str, json_mode: bool = False) -> str:
         """调用 DeepSeek Chat API"""
         import requests
 
@@ -46,6 +46,9 @@ class DeepSeekAI:
             "temperature": self.temperature,
             "stream": False,
         }
+
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         try:
             resp = requests.post(

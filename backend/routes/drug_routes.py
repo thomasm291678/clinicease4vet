@@ -1,5 +1,6 @@
 """药品库存路由：入库、出库、查询、低库存预警"""
 
+from datetime import date
 from flask import Blueprint, request, jsonify
 from database.db import get_connection
 from auth.auth import token_required
@@ -24,7 +25,8 @@ def list_drugs():
     if low_stock == "true":
         conditions.append("quantity <= min_stock_level")
     if expired == "true":
-        conditions.append("expiry_date IS NOT NULL AND expiry_date <= CURDATE()")
+        conditions.append("expiry_date IS NOT NULL AND expiry_date <= %s")
+        params.append(date.today().isoformat())
     if search:
         conditions.append("(drug_name LIKE %s OR category LIKE %s OR manufacturer LIKE %s)")
         params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])

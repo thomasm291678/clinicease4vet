@@ -94,7 +94,7 @@ def generate_soap_from_transcript(transcript: str, species: str = "狗") -> dict
 - problem_list 按临床重要性降序排列，至少3个"""
 
     ds = get_deepseek()
-    result_text = ds._chat(system_prompt, f"物种: {species}\n\n对话记录:\n{transcript}")
+    result_text = ds._chat(system_prompt, f"物种: {species}\n\n对话记录:\n{transcript}", json_mode=True)
     if result_text.startswith("[API错误]"):
         raise RuntimeError(result_text)
 
@@ -114,7 +114,7 @@ def generate_problem_list(symptoms: str, diagnosis: str, species: str = "狗") -
 输出纯JSON数组，每个元素包含: rank(序号), problem(问题名), evidence_for(支持证据), evidence_against(反对证据)。
 至少3个问题，最多7个。只输出JSON数组。"""
     ds = get_deepseek()
-    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n诊断: {diagnosis}")
+    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n诊断: {diagnosis}", json_mode=True)
     if result.startswith("[API错误]"):
         raise RuntimeError(result)
     parsed = _extract_json(result)
@@ -130,7 +130,7 @@ def generate_differential_diagnosis(symptoms: str, diagnosis: str, species: str 
 {"differential_list": [{"rank": 1, "disease": "病名", "probability": "高/中/低", "rationale": "理由"}], "must_not_miss": ["必须排除的严重疾病1"]}
 至少3个鉴别诊断，至少2个 must_not_miss。只输出JSON。"""
     ds = get_deepseek()
-    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n当前诊断: {diagnosis}")
+    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n当前诊断: {diagnosis}", json_mode=True)
     if result.startswith("[API错误]"):
         raise RuntimeError(result)
     parsed = _extract_json(result)
@@ -158,7 +158,7 @@ def generate_missing_info_and_tests(symptoms: str, diagnosis: str, species: str 
 {"missing_info": "还需要获取哪些信息，列表形式", "recommended_tests": [{"test": "检查名称", "rationale": "推荐理由"}], "dynamic_questions": "建议询问的问题"}
 只输出JSON。"""
     ds = get_deepseek()
-    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n诊断: {diagnosis}")
+    result = ds._chat(system_prompt, f"物种: {species}\n症状: {symptoms}\n诊断: {diagnosis}", json_mode=True)
     if result.startswith("[API错误]"):
         raise RuntimeError(result)
     parsed = _extract_json(result)
@@ -185,7 +185,7 @@ def generate_client_communication(diagnosis: str, plan: str, species: str = "狗
 {"observations": "主人可能观察到的症状", "concerns": "主人担心的问题", "understanding": "宜说明的要点", "shared_decision": "需共同决定的选项", "follow_up": "随访计划"}
 每个字段用一句话即可。只输出JSON。"""
     ds = get_deepseek()
-    result = ds._chat(system_prompt, f"物种: {species}\n诊断: {diagnosis}\n治疗计划: {plan}")
+    result = ds._chat(system_prompt, f"物种: {species}\n诊断: {diagnosis}\n治疗计划: {plan}", json_mode=True)
     if result.startswith("[API错误]"):
         raise RuntimeError(result)
     parsed = _extract_json(result)

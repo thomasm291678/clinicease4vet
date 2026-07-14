@@ -1,5 +1,6 @@
 """疫苗接种路由：接种记录管理、到期提醒"""
 
+from datetime import date, timedelta
 from flask import Blueprint, request, jsonify
 from database.db import get_connection
 from auth.auth import token_required
@@ -18,14 +19,16 @@ def list_vaccinations():
     cursor = conn.cursor()
 
     if upcoming == "true":
-        # 到期提醒：next_due_date 在今天之后 30 天内
+        today = date.today().isoformat()
+        future = (date.today() + timedelta(days=30)).isoformat()
         cursor.execute(
             """SELECT vr.*, p.name AS pet_name, p.species, p.owner_name, p.owner_contact
                FROM vaccination_records vr
                JOIN pet_details p ON vr.pet_id = p.id
                WHERE vr.next_due_date IS NOT NULL
-                 AND vr.next_due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-               ORDER BY vr.next_due_date ASC"""
+                 AND vr.next_due_date BETWEEN %s AND %s
+               ORDER BY vr.next_due_date ASC""",
+            (today, future),
         )
     elif pet_id:
         cursor.execute(

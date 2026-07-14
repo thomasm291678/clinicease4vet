@@ -14,7 +14,7 @@ TABLE_MAP = {
 
 
 @admin_bp.route("/api/admin/<string:role>", methods=["GET"])
-@token_required
+@role_required("admin")
 def list_staff(role):
     """查看指定角色全部人员"""
     table = TABLE_MAP.get(role)

@@ -266,106 +266,108 @@ def update_soap(record_id):
 @token_required
 def regenerate_reasoning(record_id):
     """基于当前诊断和症状，重新生成临床推理"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT diagnosis, symptoms, subjective, objective, assessment, plan FROM medical_records WHERE id = %s",
-        (record_id,),
-    )
-    record = cursor.fetchone()
-    if not record:
-        cursor.close()
-        conn.close()
-        return jsonify({"error": "记录不存在"}), 404
-
-    columns = [desc[0] for desc in cursor.description]
-    rec = dict(zip(columns, record))
-
-    diagnosis = rec.get("diagnosis") or ""
-    symptoms = rec.get("symptoms") or ""
-    plan = rec.get("plan") or ""
-
-    species = "狗"
-
+    conn = None
+    cursor = None
     try:
-        problem_list = generate_problem_list(symptoms, diagnosis, species)
-        reasoning_path = generate_clinical_reasoning_path(symptoms, diagnosis, species)
-        diff_result = generate_differential_diagnosis(symptoms, diagnosis, species)
-        missing_result = generate_missing_info_and_tests(symptoms, diagnosis, species)
-        summary = generate_case_summary(rec, species)
-        client_comm = generate_client_communication(diagnosis, plan, species)
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT diagnosis, symptoms, subjective, objective, assessment, plan FROM medical_records WHERE id = %s",
+            (record_id,),
+        )
+        record = cursor.fetchone()
+        if not record:
+            return jsonify({"error": "记录不存在"}), 404
+
+        columns = [desc[0] for desc in cursor.description]
+        rec = dict(zip(columns, record))
+
+        diagnosis = rec.get("diagnosis") or ""
+        symptoms = rec.get("symptoms") or ""
+        plan = rec.get("plan") or ""
+        species = "狗"
+
+        try:
+            problem_list = generate_problem_list(symptoms, diagnosis, species)
+            reasoning_path = generate_clinical_reasoning_path(symptoms, diagnosis, species)
+            diff_result = generate_differential_diagnosis(symptoms, diagnosis, species)
+            missing_result = generate_missing_info_and_tests(symptoms, diagnosis, species)
+            summary = generate_case_summary(rec, species)
+            client_comm = generate_client_communication(diagnosis, plan, species)
+        except Exception as e:
+            return jsonify({"error": f"推理生成失败: {e}"}), 500
+
+        reasoning_data = {
+            "problem_list": problem_list,
+            "reasoning_path": reasoning_path,
+            "differential_list": diff_result.get("differential_list", []),
+            "must_not_miss": diff_result.get("must_not_miss", []),
+            "missing_info": missing_result.get("missing_info", ""),
+            "recommended_tests": missing_result.get("recommended_tests", []),
+            "dynamic_questions": missing_result.get("dynamic_questions", ""),
+            "client_communication": client_comm,
+            "summary": summary,
+        }
+
+        def to_json(val):
+            if val is None:
+                return None
+            if isinstance(val, (dict, list)):
+                return json.dumps(val, ensure_ascii=False)
+            return str(val)
+
+        cursor.execute("SELECT id FROM clinical_reasoning WHERE record_id = %s", (record_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            cursor.execute(
+                """UPDATE clinical_reasoning SET problem_list=%s, reasoning_path=%s,
+                   differential_list=%s, must_not_miss=%s, missing_info=%s,
+                   recommended_tests=%s, dynamic_questions=%s,
+                   client_communication=%s, summary=%s WHERE record_id=%s""",
+                (
+                    to_json(reasoning_data["problem_list"]),
+                    reasoning_data["reasoning_path"],
+                    to_json(reasoning_data["differential_list"]),
+                    to_json(reasoning_data["must_not_miss"]),
+                    reasoning_data["missing_info"],
+                    to_json(reasoning_data["recommended_tests"]),
+                    reasoning_data["dynamic_questions"],
+                    to_json(reasoning_data["client_communication"]),
+                    reasoning_data["summary"],
+                    record_id,
+                ),
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO clinical_reasoning (record_id, problem_list, reasoning_path,
+                   differential_list, must_not_miss, missing_info, recommended_tests,
+                   dynamic_questions, client_communication, summary)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    record_id,
+                    to_json(reasoning_data["problem_list"]),
+                    reasoning_data["reasoning_path"],
+                    to_json(reasoning_data["differential_list"]),
+                    to_json(reasoning_data["must_not_miss"]),
+                    reasoning_data["missing_info"],
+                    to_json(reasoning_data["recommended_tests"]),
+                    reasoning_data["dynamic_questions"],
+                    to_json(reasoning_data["client_communication"]),
+                    reasoning_data["summary"],
+                ),
+            )
+
+        conn.commit()
+        return jsonify({"message": "临床推理已重新生成", "reasoning": reasoning_data}), 200
     except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"error": f"推理生成失败: {e}"}), 500
-
-    reasoning_data = {
-        "problem_list": problem_list,
-        "reasoning_path": reasoning_path,
-        "differential_list": diff_result.get("differential_list", []),
-        "must_not_miss": diff_result.get("must_not_miss", []),
-        "missing_info": missing_result.get("missing_info", ""),
-        "recommended_tests": missing_result.get("recommended_tests", []),
-        "dynamic_questions": missing_result.get("dynamic_questions", ""),
-        "client_communication": client_comm,
-        "summary": summary,
-    }
-
-    def to_json(val):
-        if val is None:
-            return None
-        if isinstance(val, (dict, list)):
-            return json.dumps(val, ensure_ascii=False)
-        return str(val)
-
-    cursor.execute("SELECT id FROM clinical_reasoning WHERE record_id = %s", (record_id,))
-    existing = cursor.fetchone()
-
-    if existing:
-        cursor.execute(
-            """UPDATE clinical_reasoning SET problem_list=%s, reasoning_path=%s,
-               differential_list=%s, must_not_miss=%s, missing_info=%s,
-               recommended_tests=%s, dynamic_questions=%s,
-               client_communication=%s, summary=%s WHERE record_id=%s""",
-            (
-                to_json(reasoning_data["problem_list"]),
-                reasoning_data["reasoning_path"],
-                to_json(reasoning_data["differential_list"]),
-                to_json(reasoning_data["must_not_miss"]),
-                reasoning_data["missing_info"],
-                to_json(reasoning_data["recommended_tests"]),
-                reasoning_data["dynamic_questions"],
-                to_json(reasoning_data["client_communication"]),
-                reasoning_data["summary"],
-                record_id,
-            ),
-        )
-    else:
-        cursor.execute(
-            """INSERT INTO clinical_reasoning (record_id, problem_list, reasoning_path,
-               differential_list, must_not_miss, missing_info, recommended_tests,
-               dynamic_questions, client_communication, summary)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                record_id,
-                to_json(reasoning_data["problem_list"]),
-                reasoning_data["reasoning_path"],
-                to_json(reasoning_data["differential_list"]),
-                to_json(reasoning_data["must_not_miss"]),
-                reasoning_data["missing_info"],
-                to_json(reasoning_data["recommended_tests"]),
-                reasoning_data["dynamic_questions"],
-                to_json(reasoning_data["client_communication"]),
-                reasoning_data["summary"],
-            ),
-        )
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    return jsonify({"message": "临床推理已重新生成", "reasoning": reasoning_data}), 200
+        return jsonify({"error": f"操作失败: {e}"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 # ======================== 单独重新生成客户沟通 ========================
@@ -374,44 +376,47 @@ def regenerate_reasoning(record_id):
 @token_required
 def regenerate_client_comm(record_id):
     """基于当前诊断和治疗计划，重新生成客户沟通模板"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT diagnosis, plan FROM medical_records WHERE id = %s", (record_id,))
-    record = cursor.fetchone()
-    if not record:
-        cursor.close()
-        conn.close()
-        return jsonify({"error": "记录不存在"}), 404
-
-    diagnosis = record[0] or ""
-    plan = record[1] or ""
-
+    conn = None
+    cursor = None
     try:
-        client_comm = generate_client_communication(diagnosis, plan, "狗")
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT diagnosis, plan FROM medical_records WHERE id = %s", (record_id,))
+        record = cursor.fetchone()
+        if not record:
+            return jsonify({"error": "记录不存在"}), 404
+
+        diagnosis = record[0] or ""
+        plan = record[1] or ""
+
+        try:
+            client_comm = generate_client_communication(diagnosis, plan, "狗")
+        except Exception as e:
+            return jsonify({"error": f"生成失败: {e}"}), 500
+
+        cursor.execute("SELECT id FROM clinical_reasoning WHERE record_id = %s", (record_id,))
+        existing = cursor.fetchone()
+
+        client_json = json.dumps(client_comm, ensure_ascii=False)
+
+        if existing:
+            cursor.execute(
+                "UPDATE clinical_reasoning SET client_communication=%s WHERE record_id=%s",
+                (client_json, record_id),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO clinical_reasoning (record_id, client_communication) VALUES (%s, %s)",
+                (record_id, client_json),
+            )
+
+        conn.commit()
+        return jsonify({"message": "客户沟通已重新生成", "client_communication": client_comm}), 200
     except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"error": f"生成失败: {e}"}), 500
-
-    cursor.execute("SELECT id FROM clinical_reasoning WHERE record_id = %s", (record_id,))
-    existing = cursor.fetchone()
-
-    client_json = json.dumps(client_comm, ensure_ascii=False)
-
-    if existing:
-        cursor.execute(
-            "UPDATE clinical_reasoning SET client_communication=%s WHERE record_id=%s",
-            (client_json, record_id),
-        )
-    else:
-        cursor.execute(
-            "INSERT INTO clinical_reasoning (record_id, client_communication) VALUES (%s, %s)",
-            (record_id, client_json),
-        )
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    return jsonify({"message": "客户沟通已重新生成", "client_communication": client_comm}), 200
+        return jsonify({"error": f"操作失败: {e}"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()

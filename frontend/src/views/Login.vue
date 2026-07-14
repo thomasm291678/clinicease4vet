@@ -28,7 +28,7 @@
             <option value="admin">管理员 (Admin)</option>
           </select>
         </div>
-        <div v-if="error" class="error-msg">{{ error }}</div>
+        <div v-if="error" :class="errorType === 'success' ? 'success-msg' : 'error-msg'">{{ error }}</div>
         <button type="submit" class="btn btn-primary btn-lg login-btn" :disabled="loading">
           {{ loading ? '请稍候...' : (isRegister ? '注册' : '登录') }}
         </button>
@@ -63,6 +63,7 @@ onMounted(() => {
 const isRegister = ref(false)
 const loading = ref(false)
 const error = ref('')
+const errorType = ref('error')
 
 const form = reactive({
   username: '',
@@ -72,6 +73,7 @@ const form = reactive({
 
 async function handleSubmit() {
   error.value = ''
+  errorType.value = 'error'
   if (!form.username.trim() || !form.password.trim()) {
     error.value = '用户名和密码不能为空'
     return
@@ -86,6 +88,7 @@ async function handleSubmit() {
     if (isRegister.value) {
       await auth.register(form.username, form.password, form.role)
       error.value = '注册成功，请登录'
+      errorType.value = 'success'
       isRegister.value = false
       form.password = ''
     } else {
@@ -93,7 +96,10 @@ async function handleSubmit() {
       router.push('/dashboard')
     }
   } catch (e) {
-    error.value = e.response?.data?.error || '操作失败，请重试'
+    const msg = e?.response?.data?.error || e?.message || '操作失败，请重试'
+    error.value = msg
+    errorType.value = 'error'
+    console.error('Auth error:', e)
   } finally {
     loading.value = false
   }
@@ -142,6 +148,15 @@ async function handleSubmit() {
 .error-msg {
   background: #fee2e2;
   color: var(--color-danger);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.success-msg {
+  background: #d1fae5;
+  color: #065f46;
   padding: 8px 12px;
   border-radius: var(--radius);
   font-size: 13px;
