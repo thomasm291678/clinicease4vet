@@ -142,8 +142,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { getMedicalRecords, createMedicalRecord, updateMedicalRecord, deleteMedicalRecord, aiAutoFill, aiGetTemplates, aiGetTemplateDetail, aiGenerateTreatment } from '../api'
+import { useAiVoiceStore } from '../stores/aiVoice'
+
+const aiVoice = useAiVoiceStore()
 import VoiceInput from '../components/VoiceInput.vue'
 
 const records = ref([])
@@ -368,6 +371,23 @@ async function handleDelete(id) {
 }
 
 onMounted(async () => {
+
+watch(() => aiVoice.lastResult, (result) => {
+  if (!result || !result.medicalInfo) return
+  const info = result.medicalInfo
+  openCreate()
+  if (info.diagnosis) form.diagnosis = info.diagnosis
+  if (info.treatment) form.treatment = info.treatment
+  if (info.symptoms) form.symptoms = info.symptoms
+  if (info.fee_charged || info.fee) form.fee_charged = info.fee_charged || info.fee
+  if (info.vet_name) form.vet_name = info.vet_name
+  if (info.visit_date) form.visit_date = info.visit_date
+  if (info.follow_up_date) form.follow_up_date = info.follow_up_date
+  if (result.petInfo?.name && !form.pet_id) {
+    // Try to find pet by name or create
+  }
+  aiVoice.consumeResult()
+}, { deep: true })
   fetchRecords()
   try {
     const res = await aiGetTemplates()

@@ -339,7 +339,24 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.ai-page { max-width: 800px; }
+.ai-page {
+  width: 100%;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+}
 
 .ai-tabs {
   display: flex;

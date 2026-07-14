@@ -114,8 +114,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { getVaccinations, createVaccination, deleteVaccination, getPets } from '../api'
+import { useAiVoiceStore } from '../stores/aiVoice'
+
+const aiVoice = useAiVoiceStore()
 import VoiceInput from '../components/VoiceInput.vue'
 
 const records = ref([])
@@ -200,6 +203,21 @@ async function handleDelete(id) {
 }
 
 onMounted(fetchRecords)
+
+watch(() => aiVoice.lastResult, (result) => {
+  if (!result || !result.vaccineInfo) return
+  const info = result.vaccineInfo
+  if (!info.vaccine_name) return
+  resetForm()
+  if (info.vaccine_name) form.vaccine_name = info.vaccine_name
+  if (info.vet_name) form.vet_name = info.vet_name
+  if (info.administered_date) form.administered_date = info.administered_date
+  if (info.next_due_date) form.next_due_date = info.next_due_date
+  if (info.batch_number) form.batch_number = info.batch_number
+  if (info.dose_number) form.dose_number = info.dose_number
+  showModal.value = true
+  aiVoice.consumeResult()
+}, { deep: true })
 </script>
 
 <style scoped>

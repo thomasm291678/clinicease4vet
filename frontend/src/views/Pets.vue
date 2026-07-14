@@ -183,8 +183,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useAiVoiceStore } from '../stores/aiVoice'
 import { getPets, createPet, updatePet, deletePet, aiPetSummary, createMedicalRecord, updateMedicalRecord } from '../api'
+
+const aiVoice = useAiVoiceStore()
 import VoiceInput from '../components/VoiceInput.vue'
 
 const pets = ref([])
@@ -390,6 +393,21 @@ async function saveTreatment() {
 }
 
 onMounted(fetchPets)
+
+watch(() => aiVoice.lastResult, (result) => {
+  if (!result || !result.petInfo) return
+  const info = result.petInfo
+  if (info.name) form.name = info.name
+  if (info.species) form.species = info.species
+  if (info.breed) form.breed = info.breed
+  if (info.gender) form.gender = info.gender === '雄性' || info.gender === '公' ? '公' : info.gender === '雌性' || info.gender === '母' ? '母' : ''
+  if (info.age_months || info.age) form.age_months = info.age_months || info.age
+  if (info.weight_kg || info.weight) form.weight_kg = info.weight_kg || info.weight
+  if (info.owner_name) form.owner_name = info.owner_name
+  if (info.owner_contact || info.owner_phone) form.owner_contact = info.owner_contact || info.owner_phone
+  showModal.value = true
+  aiVoice.consumeResult()
+}, { deep: true })
 </script>
 
 <style scoped>

@@ -6,6 +6,59 @@
         <span v-if="recordData.id" class="case-id">病例编号: CN{{ String(recordData.id).padStart(4, '0') }}</span>
       </div>
 
+      <!-- ========== 快捷工具栏 ========== -->
+      <div class="soap-toolbar">
+        <!-- 模板选择 -->
+        <div class="toolbar-section">
+          <label class="toolbar-label">病历模板</label>
+          <div class="toolbar-row">
+            <select v-model="selectedTemplate" class="input template-select" @change="onTemplateChange">
+              <option value="">-- 选择常见病历模板 --</option>
+              <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
+            </select>
+            <button class="btn btn-outline btn-sm" @click="applyTemplate" :disabled="!selectedTemplate || aiBusy">
+              填充模板
+            </button>
+          </div>
+        </div>
+
+        <!-- 语音录入 -->
+        <div class="toolbar-section voice-section">
+          <label class="toolbar-label">语音识别录入</label>
+          <button
+            :class="['btn-voice-big', recording ? 'is-recording' : '', uploading ? 'is-uploading' : '', aiBusy && !recording && !uploading ? 'is-thinking' : '']"
+            :disabled="uploading"
+            @click="toggleRecording"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+            <span class="voice-btn-text">{{ recording ? '停止录音' : uploading ? '转写中...' : aiBusy ? 'AI 分析中...' : '语音识别录入' }}</span>
+          </button>
+          <span v-if="recording" class="recording-timer">{{ recordingTime }}s</span>
+          <button v-if="transcriptText && !aiBusy" class="btn btn-sm" style="margin-left:8px;" @click="reParseTranscript">
+            重新解析
+          </button>
+        </div>
+      </div>
+
+      <!-- 转录文字展示 -->
+      <div v-if="transcriptText" class="transcript-display">
+        <div class="transcript-header">
+          <span>📝 识别文字</span>
+          <button class="btn-text" @click="transcriptText = ''">清除</button>
+        </div>
+        <div class="transcript-body">{{ transcriptText }}</div>
+      </div>
+
+      <!-- 状态提示 -->
+      <div v-if="aiBusy && !recording && !uploading" class="ai-thinking-bar">
+        <span class="thinking-dot"></span> DeepSeek AI 正在分析识别内容，自动填入 SOAP 表单中...
+      </div>
+
       <div class="tabs">
         <button :class="['tab', { active: activeTab === 'soap' }]" @click="activeTab = 'soap'">SOAP病历</button>
         <button :class="['tab', { active: activeTab === 'reasoning' }]" @click="activeTab = 'reasoning'">临床推理</button>
@@ -16,31 +69,19 @@
         <div class="soap-grid">
           <div class="soap-box">
             <div class="soap-label">S 主观信息</div>
-            <div class="soap-input-wrap">
-              <textarea v-model="soap.subjective" class="input soap-input" rows="6" placeholder="主诉、病程、病史、主人观察..."></textarea>
-              <VoiceInput v-model="soap.subjective" size="sm" />
-            </div>
+            <textarea v-model="soap.subjective" class="input soap-input" rows="6" placeholder="主诉、病程、病史、主人观察..."></textarea>
           </div>
           <div class="soap-box">
             <div class="soap-label">O 客观检查</div>
-            <div class="soap-input-wrap">
-              <textarea v-model="soap.objective" class="input soap-input" rows="6" placeholder="体温、心率、触诊、听诊、实验室结果..."></textarea>
-              <VoiceInput v-model="soap.objective" size="sm" />
-            </div>
+            <textarea v-model="soap.objective" class="input soap-input" rows="6" placeholder="体温、心率、触诊、听诊、实验室结果..."></textarea>
           </div>
           <div class="soap-box">
             <div class="soap-label">A 评估</div>
-            <div class="soap-input-wrap">
-              <textarea v-model="soap.assessment" class="input soap-input" rows="5" placeholder="问题列表、鉴别诊断、临床判断..."></textarea>
-              <VoiceInput v-model="soap.assessment" size="sm" />
-            </div>
+            <textarea v-model="soap.assessment" class="input soap-input" rows="5" placeholder="问题列表、鉴别诊断、临床判断..."></textarea>
           </div>
           <div class="soap-box">
             <div class="soap-label">P 计划</div>
-            <div class="soap-input-wrap">
-              <textarea v-model="soap.plan" class="input soap-input" rows="5" placeholder="检查计划、治疗计划、护理建议、随访..."></textarea>
-              <VoiceInput v-model="soap.plan" size="sm" />
-            </div>
+            <textarea v-model="soap.plan" class="input soap-input" rows="5" placeholder="检查计划、治疗计划、护理建议、随访..."></textarea>
           </div>
         </div>
 
@@ -72,9 +113,6 @@
 
         <div class="soap-actions">
           <button class="btn btn-primary" @click="saveSOAP" :disabled="saving">保存 SOAP</button>
-          <button class="btn btn-outline" @click="generateFromAI" :disabled="generating">
-            {{ generating ? 'AI 生成中...' : 'AI 一键生成 SOAP' }}
-          </button>
         </div>
 
         <div v-if="summary" class="case-summary">
@@ -150,32 +188,33 @@
       </div>
     </div>
 
-    <!-- 对话输入区 -->
+    <!-- 对话记录区（可折叠） -->
     <div class="card">
-      <div class="card-header">
-        <span class="card-title">对话记录</span>
+      <div class="card-header" @click="showTranscriptCard = !showTranscriptCard" style="cursor:pointer;">
+        <span class="card-title">📋 对话记录 {{ showTranscriptCard ? '▼' : '▶' }}</span>
       </div>
-      <textarea v-model="transcript" class="input" rows="8" placeholder="粘贴医生-主人对话记录，或点击下方按钮录音..."></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn btn-outline btn-sm" @click="transcribeAndGenerate" :disabled="generating">
-          {{ generating ? '处理中...' : '录音 → AI 生成完整 SOAP' }}
-        </button>
-        <button class="btn btn-primary btn-sm" @click="parseTranscript" :disabled="generating || !transcript">
-          {{ generating ? 'AI 分析中...' : '粘贴文本 → AI 生成 SOAP' }}
-        </button>
+      <div v-show="showTranscriptCard">
+        <textarea v-model="manualTranscript" class="input" rows="6" placeholder="粘贴医生-主人对话记录，点击下方 AI 生成 SOAP..."></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn btn-primary btn-sm" @click="manualParseTranscript" :disabled="aiBusy || !manualTranscript">
+            {{ aiBusy ? 'AI 分析中...' : '粘贴文本 → AI 生成 SOAP' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import VoiceInput from '../components/VoiceInput.vue'
 import {
-  soapFromTranscript, soapFromTranscriptAudio, soapGet, soapUpdate,
-  soapReasoning, soapClientComm,
+  soapFromTranscript, soapGet, soapUpdate, soapReasoning, soapClientComm,
+  aiTranscribe, aiGetTemplates, aiGetTemplateDetail, aiTranscribeAndFill,
 } from '../api'
+import { useAiVoiceStore } from '../stores/aiVoice'
+
+const aiVoice = useAiVoiceStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -186,8 +225,10 @@ const activeTab = ref('soap')
 const saving = ref(false)
 const generating = ref(false)
 
-const transcript = ref('')
+const manualTranscript = ref('')
+const transcriptText = ref('')
 const summary = ref('')
+const showTranscriptCard = ref(false)
 
 const soap = reactive({ subjective: '', objective: '', assessment: '', plan: '' })
 const clientComm = reactive({
@@ -202,15 +243,161 @@ const missingInfo = ref('')
 const recommendedTests = ref([])
 const dynamicQuestions = ref('')
 
+// 模板相关
+const templates = ref([])
+const selectedTemplate = ref('')
+
+// 录音相关
+const recording = ref(false)
+const uploading = ref(false)
+const aiBusy = ref(false)
+const recordingTime = ref(0)
+let mediaRecorder = null
+let audioChunks = []
+let recordingTimer = null
+
 function showToast(msg, type = '') {
+  if (type === 'error') {
+    alert(msg)
+    return
+  }
   const toast = document.getElementById('global-toast')
   if (toast) {
     toast.textContent = msg
-    toast.className = `global-toast ${type}` || 'global-toast'
+    toast.className = 'global-toast'
     toast.style.display = 'block'
     setTimeout(() => { toast.style.display = 'none' }, 3000)
   }
 }
+
+// ==================== 模板 ====================
+
+async function loadTemplates() {
+  try {
+    const res = await aiGetTemplates()
+    templates.value = res.data?.templates || []
+  } catch (e) {
+    // ignore
+  }
+}
+
+function onTemplateChange() {
+  // just store selection, wait for explicit button click
+}
+
+async function applyTemplate() {
+  if (!selectedTemplate.value) return
+  try {
+    const res = await aiGetTemplateDetail(selectedTemplate.value)
+    const content = res.data?.content
+    if (content) {
+      transcriptText.value = content
+      await parseTranscriptText(content)
+      showToast('模板内容已填入SOAP字段')
+    }
+  } catch (e) {
+    showToast('模板加载失败', 'error')
+  }
+}
+
+// ==================== 录音 ====================
+
+function toggleRecording() {
+  if (recording.value) {
+    stopRecording()
+    return
+  }
+  startRecording()
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    audioChunks = []
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data)
+    }
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop())
+      if (audioChunks.length === 0) {
+        recording.value = false
+        return
+      }
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
+      await transcribeAndFill(audioBlob)
+    }
+
+    mediaRecorder.start(250)
+    recording.value = true
+    recordingTime.value = 0
+    recordingTimer = setInterval(() => { recordingTime.value++ }, 1000)
+  } catch (e) {
+    showToast('无法访问麦克风，请检查权限', 'error')
+  }
+}
+
+function stopRecording() {
+  if (recordingTimer) { clearInterval(recordingTimer); recordingTimer = null }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop()
+  }
+  recording.value = false
+}
+
+async function transcribeAndFill(audioBlob) {
+  uploading.value = true
+  try {
+    // 第一步：讯飞 ASR 语音转文字
+    const asrRes = await aiTranscribe(audioBlob)
+    const text = asrRes.data?.text || ''
+    uploading.value = false
+
+    if (!text) {
+      showToast('未识别到语音内容，请重试', 'error')
+      return
+    }
+
+    transcriptText.value = text
+
+    // 第二步：DeepSeek 解析文字 → 填入 SOAP
+    await parseTranscriptText(text)
+  } catch (e) {
+    uploading.value = false
+    const errMsg = e.response?.data?.error || e.message || '语音识别失败'
+    showToast(errMsg, 'error')
+  }
+}
+
+async function parseTranscriptText(text) {
+  if (!text || !text.trim()) return
+  aiBusy.value = true
+  try {
+    const res = await soapFromTranscript({ transcript: text, species: '狗' })
+    fillFromAI(res.data)
+    showToast('AI 解析完成，SOAP 表单已填充')
+  } catch (e) {
+    showToast('AI 解析失败: ' + (e.response?.data?.error || e.message), 'error')
+  } finally {
+    aiBusy.value = false
+  }
+}
+
+async function reParseTranscript() {
+  if (!transcriptText.value) return
+  await parseTranscriptText(transcriptText.value)
+}
+
+// ==================== 手动粘贴 ====================
+
+async function manualParseTranscript() {
+  if (!manualTranscript.value.trim()) return
+  await parseTranscriptText(manualTranscript.value)
+}
+
+// ==================== SOAP 加载/保存 ====================
 
 async function loadSOAP() {
   if (!recordId.value) return
@@ -238,60 +425,7 @@ async function loadSOAP() {
       summary.value = d.reasoning.summary || ''
     }
   } catch (e) {
-    // 记录不存在，保持空白表单
-  }
-}
-
-async function parseTranscript() {
-  if (!transcript.value) return
-  generating.value = true
-  try {
-    const res = await soapFromTranscript({ transcript: transcript.value })
-    fillFromAI(res.data)
-    showToast('AI 分析完成')
-  } catch (e) {
-    showToast('AI 分析失败: ' + (e.response?.data?.error || e.message), 'error')
-  } finally {
-    generating.value = false
-  }
-}
-
-async function transcribeAndGenerate() {
-  generating.value = true
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-    const chunks = []
-
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
-    recorder.start(250)
-
-    await new Promise((resolve) => {
-      recorder.onstop = resolve
-      showToast('正在录音... 点击停止')
-      setTimeout(() => {
-        if (recorder.state !== 'inactive') {
-          recorder.stop()
-        }
-      }, 60000)
-    })
-
-    stream.getTracks().forEach(t => t.stop())
-    if (chunks.length === 0) {
-      showToast('未录制到音频', 'error')
-      generating.value = false
-      return
-    }
-
-    const audioBlob = new Blob(chunks, { type: 'audio/webm' })
-    const res = await soapFromTranscriptAudio(audioBlob)
-    fillFromAI(res.data)
-    transcript.value = res.data.transcript || ''
-    showToast('语音转写 + AI 分析完成')
-  } catch (e) {
-    showToast(e.response?.data?.error || '操作失败', 'error')
-  } finally {
-    generating.value = false
+    // 记录不存在，空白表单
   }
 }
 
@@ -315,23 +449,7 @@ function fillFromAI(data) {
     Object.assign(clientComm, data.client_communication)
   }
   summary.value = data.summary || ''
-}
-
-async function generateFromAI() {
-  if (!transcript.value) {
-    showToast('请先在对话记录区输入内容', 'error')
-    return
-  }
-  generating.value = true
-  try {
-    const res = await soapFromTranscript({ transcript: transcript.value })
-    fillFromAI(res.data)
-    showToast('AI 生成完成')
-  } catch (e) {
-    showToast('AI 生成失败: ' + (e.response?.data?.error || e.message), 'error')
-  } finally {
-    generating.value = false
-  }
+  activeTab.value = 'soap'
 }
 
 async function saveSOAP() {
@@ -398,7 +516,20 @@ async function saveReasoning() {
 
 onMounted(() => {
   loadSOAP()
+  loadTemplates()
 })
+
+watch(() => aiVoice.lastResult, (result) => {
+  if (!result) return
+  if (result.soapData) {
+    fillFromAI(result)
+    showToast('AI 结果已填入 SOAP 表单')
+  } else if (result.petInfo || result.medicalInfo) {
+    // fill partial data
+    if (result.petInfo?.name) transcriptText.value = transcriptText.value || result.transcript || ''
+  }
+  aiVoice.consumeResult()
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -415,6 +546,171 @@ onMounted(() => {
   border-radius: 6px;
 }
 
+/* ========== 快捷工具栏 ========== */
+.soap-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 16px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.toolbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolbar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-select {
+  width: 240px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+/* 语音按钮 */
+.voice-section {
+  margin-left: auto;
+}
+
+.btn-voice-big {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 24px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.3);
+  white-space: nowrap;
+}
+
+.btn-voice-big:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.btn-voice-big:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-voice-big.is-recording {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 3px 12px rgba(239, 68, 68, 0.4);
+  animation: pulse-rec 1.2s infinite;
+}
+
+.btn-voice-big.is-uploading {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 3px 12px rgba(245, 158, 11, 0.35);
+}
+
+.btn-voice-big.is-thinking {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.35);
+}
+
+@keyframes pulse-rec {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
+}
+
+.recording-timer {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ef4444;
+  margin-left: 8px;
+}
+
+/* 转录文字展示 */
+.transcript-display {
+  margin-bottom: 14px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #e0f2fe;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0369a1;
+}
+
+.btn-text {
+  font-size: 12px;
+  color: #0284c7;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.transcript-body {
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* AI 思考中 */
+.ai-thinking-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #065f46;
+}
+
+.thinking-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: thinking-blink 1s infinite;
+}
+
+@keyframes thinking-blink {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ========== 原有样式 ========== */
 .tabs {
   display: flex;
   gap: 0;
@@ -474,16 +770,10 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
-.soap-input-wrap {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
 .soap-input {
-  flex: 1;
   font-size: 13px;
   resize: vertical;
+  width: 100%;
 }
 
 .client-comm-section {
@@ -645,5 +935,23 @@ onMounted(() => {
 
 .test-list li:last-child {
   border-bottom: none;
+}
+
+@media (max-width: 768px) {
+  .soap-toolbar {
+    flex-direction: column;
+  }
+  .voice-section {
+    margin-left: 0;
+  }
+  .soap-grid {
+    grid-template-columns: 1fr;
+  }
+  .soap-box:nth-child(1),
+  .soap-box:nth-child(2),
+  .soap-box:nth-child(3),
+  .soap-box:nth-child(4) {
+    grid-column: 1;
+  }
 }
 </style>

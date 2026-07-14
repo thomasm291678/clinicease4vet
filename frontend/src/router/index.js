@@ -52,7 +52,7 @@ const routes = [
         path: 'ai',
         name: 'AI',
         component: () => import('../views/AI.vue'),
-        meta: { title: 'AI 助手' },
+        meta: { title: 'AI 语音工作台' },
       },
       {
         path: 'soap/:id?',
