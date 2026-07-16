@@ -14,7 +14,6 @@ import json
 from flask import Blueprint, request, jsonify
 from database.db import get_connection
 from auth.auth import token_required
-from services.asr_service import transcribe_audio as asr_transcribe
 from services.clinical_reasoning import (
     generate_soap_from_transcript,
     generate_problem_list,
@@ -95,9 +94,9 @@ def from_transcript_audio():
 
     species = request.form.get("species", "狗").strip()
 
-    # 转写
     try:
-        transcript_result = asr_transcribe(audio_data, audio_file.filename or "recording.webm")
+        from services.funasr_service import transcribe_audio as funasr_transcribe
+        transcript_result = funasr_transcribe(audio_data, audio_file.filename or "recording.webm")
         transcript = transcript_result.get("text", "")
     except Exception as e:
         return jsonify({"error": f"语音转写失败: {e}"}), 500

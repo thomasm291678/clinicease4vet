@@ -3,3 +3,14 @@ mysql-connector-python==8.4.0
 PyJWT==2.9.0
 bcrypt==4.2.0
 cryptography==43.0.1
+requests>=2.31.0
+numpy>=1.24.0
+PyMuPDF>=1.23.0
+sentence-transformers>=2.7.0
+faiss-cpu>=1.7.4
+# FunASR 离线语音识别 (替代讯飞)
+funasr_onnx>=0.4.1
+soundfile>=0.13.1
+librosa>=0.11.0
+jieba>=0.42.1
+modelscope>=1.30.0

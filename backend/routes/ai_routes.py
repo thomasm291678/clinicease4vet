@@ -1,24 +1,24 @@
 """
-AI 助手路由：DeepSeek LLM 智能解析 + 科大讯飞语音转文字
+AI 助手路由：DeepSeek LLM + FunASR 离线语音识别
 
 端点:
-  POST /api/ai/transcribe         - 上传音频 → 讯飞语音转文字
-  POST /api/ai/transcribe-and-fill - 音频/文本 → DeepSeek解析 → 预填表单
-  POST /api/ai/parse-record       - DeepSeek 解析文本为结构化病历
-  POST /api/ai/auto-fill          - 文本 → DeepSeek 解析 → 预填表单
-  GET  /api/ai/disease-suggest    - DeepSeek 症状 → 疾病建议
-  GET  /api/ai/pet-summary        - 宠物病程汇总
-  GET  /api/ai/templates          - 获取模板列表
-  GET  /api/ai/templates/<id>     - 获取模板详情
-  POST /api/ai/generate-treatment - DeepSeek 生成治疗方案
-  GET  /api/ai/engine-status      - AI 引擎状态
+  POST /api/ai/transcribe           - 上传音频 → FunASR 离线转文字
+  POST /api/ai/transcribe-and-fill  - 音频/文本 → DeepSeek解析 → 预填表单
+  POST /api/ai/parse-record         - DeepSeek 解析文本为结构化病历
+  POST /api/ai/auto-fill            - 文本 → DeepSeek 解析 → 预填表单
+  GET  /api/ai/disease-suggest      - DeepSeek 症状 → 疾病建议
+  GET  /api/ai/pet-summary          - 宠物病程汇总
+  GET  /api/ai/templates            - 获取模板列表
+  GET  /api/ai/templates/<id>       - 获取模板详情
+  POST /api/ai/generate-treatment   - DeepSeek 生成治疗方案
+  GET  /api/ai/engine-status        - AI 引擎状态
 """
 
 from flask import Blueprint, request, jsonify
 from config import Config
 from services.ai_parser import parse_medical_text_with_llm
-from services.asr_service import transcribe_audio as asr_transcribe
 from services.deepseek_service import get_deepseek
+from services.funasr_service import transcribe_audio as funasr_transcribe
 from database.db import get_connection
 from auth.auth import token_required
 
@@ -42,7 +42,7 @@ def transcribe_audio_route():
         return jsonify({"error": "音频文件过大 (最大 500MB)"}), 413
 
     try:
-        result = asr_transcribe(audio_data, audio_file.filename or "recording.wav")
+        result = funasr_transcribe(audio_data, audio_file.filename or "recording.wav")
     except Exception as e:
         return jsonify({"error": f"语音转写失败: {e}"}), 500
 
@@ -52,7 +52,8 @@ def transcribe_audio_route():
     return jsonify({
         "text": result.get("text", ""),
         "confidence": result.get("confidence", 0),
-        "engine": "iflytek",
+        "engine": "funasr",
+        "elapsed": result.get("elapsed", 0),
         "audio_size": len(audio_data),
     }), 200
 
@@ -72,7 +73,7 @@ def transcribe_and_fill():
             audio_data = audio_file.read()
             if audio_data:
                 try:
-                    result = asr_transcribe(audio_data, audio_file.filename or "audio.webm")
+                    result = funasr_transcribe(audio_data, audio_file.filename or "audio.webm")
                     text = result.get("text", "")
                 except Exception as e:
                     return jsonify({"error": f"语音转写失败: {e}"}), 500
@@ -375,9 +376,399 @@ def generate_treatment():
 @token_required
 def engine_status():
     ds = get_deepseek()
+
+    kb_status = {"rag_available": False, "rag_stats": {}}
+    try:
+        from services.rag_service import get_knowledge_base
+        kb = get_knowledge_base()
+        kb_status["rag_available"] = kb.is_ready
+        kb_status["rag_stats"] = kb.get_stats()
+    except Exception:
+        pass
+
+    funasr_ok = False
+    try:
+        from services.funasr_service import is_available
+        funasr_ok = is_available()
+    except Exception:
+        pass
+
     return jsonify({
         "ai_engine": "deepseek",
+        "asr_engine": "funasr",
         "deepseek_configured": ds.is_configured(),
         "deepseek_model": Config.DEEPSEEK_MODEL,
-        "iflytek_configured": True,
+        "funasr_available": funasr_ok,
+        "features": {
+            "multi_agent": True,
+            "grpo_self_verify": True,
+            "drug_safety_check": True,
+            "differential_with_evidence": True,
+        },
+        **kb_status,
     }), 200
+
+
+# ======================== RAG 知识库端点 ========================
+
+@ai_bp.route("/api/ai/kb/stats", methods=["GET"])
+@token_required
+def kb_stats():
+    try:
+        from services.rag_service import get_knowledge_base
+        kb = get_knowledge_base()
+        return jsonify(kb.get_stats()), 200
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
+@ai_bp.route("/api/ai/kb/search", methods=["GET"])
+@token_required
+def kb_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "请提供查询关键词"}), 400
+
+    top_k = request.args.get("top_k", 5, type=int)
+
+    try:
+        from services.rag_service import get_knowledge_base
+        kb = get_knowledge_base()
+
+        if not kb.is_ready:
+            return jsonify({"error": "知识库尚未构建"}), 503
+
+        if not kb._chunks:
+            kb.load()
+
+        results = kb.search(query, top_k=min(top_k, 20))
+
+        tavily_results = None
+        if len(results) == 0:
+            try:
+                from services.tavily_service import search_vet
+                tavily_results = search_vet(query, max_results=min(top_k, 10))
+            except Exception:
+                pass
+
+        return jsonify({
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "tavily_fallback": tavily_results,
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/kb/chat", methods=["POST"])
+@token_required
+def kb_chat():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    question = (data.get("question") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not question:
+        return jsonify({"error": "请输入问题"}), 400
+
+    try:
+        from services.clinical_reasoning import rag_vet_chat
+        answer = rag_vet_chat(question, species)
+
+        from services.tavily_service import search_vet_context
+        tavily_ctx = search_vet_context(f"{species} {question}", max_tokens=1500)
+        if tavily_ctx and "没有找到相关" in answer:
+            ds = get_deepseek()
+            if ds.is_configured():
+                prompt = f"你是兽医专家。根据联网搜索结果回答问题。\n\n{tavily_ctx}\n\n问题: {question}"
+                try:
+                    enhanced = ds._chat(prompt, "")
+                    if enhanced and not enhanced.startswith("[API错误]"):
+                        answer = enhanced
+                except Exception:
+                    pass
+
+        return jsonify({
+            "question": question,
+            "species": species,
+            "answer": answer,
+            "engine": "deepseek_rag",
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/kb/treatment", methods=["POST"])
+@token_required
+def kb_treatment():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    symptoms = (data.get("symptoms") or "").strip()
+    diagnosis = (data.get("diagnosis") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not symptoms and not diagnosis:
+        return jsonify({"error": "请提供症状或诊断信息"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_treatment_plan_rag
+        treatment = generate_treatment_plan_rag(symptoms, diagnosis, species)
+        return jsonify({
+            "treatment": treatment,
+            "engine": "deepseek_rag",
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/kb/soap", methods=["POST"])
+@token_required
+def kb_soap():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    transcript = (data.get("transcript") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not transcript:
+        return jsonify({"error": "请提供对话记录"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_soap_from_transcript_rag
+        result = generate_soap_from_transcript_rag(transcript, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/kb/differential", methods=["POST"])
+@token_required
+def kb_differential():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    symptoms = (data.get("symptoms") or "").strip()
+    diagnosis = (data.get("diagnosis") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not symptoms:
+        return jsonify({"error": "请提供症状信息"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_differential_diagnosis_rag
+        result = generate_differential_diagnosis_rag(symptoms, diagnosis, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ========================
+# Multi-Agent + GRPO 增强端点
+# ========================
+
+@ai_bp.route("/api/ai/soap/multi-agent", methods=["POST"])
+@token_required
+def soap_multi_agent():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    transcript = (data.get("transcript") or data.get("text") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not transcript:
+        return jsonify({"error": "请提供对话记录或文本"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_soap_with_multi_agent
+        result = generate_soap_with_multi_agent(transcript, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/soap/grpo", methods=["POST"])
+@token_required
+def soap_grpo():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    transcript = (data.get("transcript") or data.get("text") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not transcript:
+        return jsonify({"error": "请提供对话记录或文本"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_soap_with_grpo
+        result = generate_soap_with_grpo(transcript, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/multi-agent/diagnose", methods=["POST"])
+@token_required
+def multi_agent_diagnose():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    case_info = (data.get("case_info") or data.get("text") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not case_info:
+        return jsonify({"error": "请提供病例描述"}), 400
+
+    agents = data.get("agents", ["internal_medicine", "surgery", "dermatology", "pharmacology"])
+
+    try:
+        from services.multi_agent_service import multi_agent_diagnosis as ma_diag
+        result = ma_diag(case_info, species, agents=agents)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/grpo/verify", methods=["POST"])
+@token_required
+def grpo_verify():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    case_info = (data.get("case_info") or data.get("text") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not case_info:
+        return jsonify({"error": "请提供病例描述"}), 400
+
+    n_candidates = data.get("n_candidates", 3)
+
+    try:
+        from services.multi_agent_service import grpo_self_verify
+        result = grpo_self_verify(case_info, species, n_candidates=n_candidates)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/drug/safety", methods=["POST"])
+@token_required
+def drug_safety():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    drug_name = (data.get("drug_name") or "").strip()
+    species = (data.get("species") or "狗").strip()
+    weight_kg = data.get("weight_kg")
+
+    if not drug_name:
+        return jsonify({"error": "请提供药物名称"}), 400
+
+    try:
+        from services.clinical_reasoning import drug_safety_check
+        result = drug_safety_check(drug_name, species, weight_kg=weight_kg)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/differential/evidence", methods=["POST"])
+@token_required
+def differential_evidence():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    symptoms = (data.get("symptoms") or "").strip()
+    diagnosis = (data.get("diagnosis") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not symptoms:
+        return jsonify({"error": "请提供症状信息"}), 400
+
+    try:
+        from services.clinical_reasoning import generate_differential_with_evidence
+        result = generate_differential_with_evidence(symptoms, diagnosis, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/triage", methods=["POST"])
+@token_required
+def ai_triage():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    case_info = (data.get("case_info") or data.get("text") or "").strip()
+    species = (data.get("species") or "狗").strip()
+
+    if not case_info:
+        return jsonify({"error": "请提供病例描述"}), 400
+
+    try:
+        from services.multi_agent_service import agent_triage
+        result = agent_triage(case_info, species)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ========================
+# Tavily 联网兽医搜索
+# ========================
+
+@ai_bp.route("/api/ai/vet-search", methods=["POST"])
+@token_required
+def vet_search():
+    """Tavily 联网兽医文献搜索"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    query = (data.get("query") or data.get("q") or "").strip()
+    if not query:
+        return jsonify({"error": "请提供搜索关键词"}), 400
+
+    max_results = data.get("max_results", 5)
+
+    try:
+        from services.tavily_service import search_vet
+        result = search_vet(query, max_results=max_results)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@ai_bp.route("/api/ai/vet-search/context", methods=["POST"])
+@token_required
+def vet_search_context():
+    """Tavily 联网搜索 → RAG 上下文拼接"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    query = (data.get("query") or data.get("q") or "").strip()
+    if not query:
+        return jsonify({"error": "请提供搜索关键词"}), 400
+
+    max_tokens = data.get("max_tokens", 2000)
+
+    try:
+        from services.tavily_service import search_vet_context
+        context = search_vet_context(query, max_tokens=max_tokens)
+        return jsonify({"context": context, "query": query}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
