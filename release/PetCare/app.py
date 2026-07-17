@@ -1,6 +1,7 @@
 """PetCare 宠物医院管理系统 - Flask 后端主入口"""
 
-from flask import Flask, jsonify
+import os
+from flask import Flask, jsonify, send_from_directory
 
 try:
     import config_api
@@ -18,27 +19,14 @@ from routes.drug_routes import drug_bp
 from routes.ai_routes import ai_bp
 from routes.soap_routes import soap_bp
 
-
-def init_knowledge_base():
-    """启动时自动加载中英双语知识库"""
-    try:
-        from services.rag_service import get_knowledge_base
-        for lang, label in [("en", "英文"), ("zh", "中文")]:
-            kb = get_knowledge_base(lang)
-            if kb.is_ready:
-                kb.load()
-                stats = kb.get_stats()
-                print(f"[RAG] {label}知识库已加载 | 文件: {len(set(m.get('source','') for m in kb._chunk_meta))} | "
-                      f"文本块: {stats.get('total_chunks',0)} | "
-                      f"页数: {stats.get('total_pages',0)}")
-            else:
-                print(f"[RAG] {label}知识库索引未构建")
-    except Exception as e:
-        print(f"[RAG] 知识库加载失败: {e}")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=None)
+    app.config["JSON_AS_ASCII"] = False
+
+    init_database()
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
@@ -48,6 +36,16 @@ def create_app() -> Flask:
     app.register_blueprint(drug_bp)
     app.register_blueprint(ai_bp)
     app.register_blueprint(soap_bp)
+
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def catch_all(path):
+        if path.startswith("api/"):
+            return jsonify({"error": "接口不存在"}), 404
+        file_path = os.path.join(STATIC_DIR, path) if path else os.path.join(STATIC_DIR, "index.html")
+        if os.path.isfile(file_path):
+            return send_from_directory(STATIC_DIR, path or "index.html")
+        return send_from_directory(STATIC_DIR, "index.html")
 
     @app.errorhandler(404)
     def not_found(e):
@@ -61,25 +59,15 @@ def create_app() -> Flask:
     def internal_error(e):
         return jsonify({"error": "服务器内部错误"}), 500
 
-    @app.route("/api/health", methods=["GET"])
-    def health():
-        return jsonify({"status": "ok", "service": "PetCare Veterinary API"}), 200
-
     return app
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  PetCare 宠物医院管理系统 v2.0")
+    print("  PetCare 宠物医院管理系统")
     print("=" * 50)
     print("正在初始化数据库...")
-    init_database()
     print("数据库初始化完成。")
-
-    print("正在加载知识库...")
-    init_knowledge_base()
-
     app = create_app()
     print(f"服务器启动: http://{Config.HOST}:{Config.PORT}")
-    print("API 健康检查: http://{Config.HOST}:{Config.PORT}/api/health")
     app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)

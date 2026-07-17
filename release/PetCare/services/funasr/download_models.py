@@ -8,8 +8,8 @@ import logging
 import sys
 import json
 import threading
-from app.funasr_config import MODEL_REVISION, get_models_for_download
-from app.logging_config import setup_logging
+from services.funasr.funasr_config import MODEL_REVISION, get_models_for_download
+from services.funasr.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
