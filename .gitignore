@@ -39,3 +39,17 @@ data/funasr_models/
 wheels/torch*
 wheels/scipy*
 wheels/scikit*
+
+# Knowledge base sources (too large, users rebuild from PDFs)
+backend/data/pdf_source/
+backend/data/zh_translated/
+
+# Logs
+backend/services/funasr/logs/
+
+# Mac release data (duplicate of backend/data)
+release/PetCare_mac/data/
+release/PetCare_mac/wheels/
+
+# Build artifacts
+frontend/dist/

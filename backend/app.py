@@ -17,6 +17,7 @@ from routes.vaccination_routes import vaccine_bp
 from routes.drug_routes import drug_bp
 from routes.ai_routes import ai_bp
 from routes.soap_routes import soap_bp
+from routes.calendar_routes import calendar_bp
 
 
 def init_knowledge_base():
@@ -48,6 +49,7 @@ def create_app() -> Flask:
     app.register_blueprint(drug_bp)
     app.register_blueprint(ai_bp)
     app.register_blueprint(soap_bp)
+    app.register_blueprint(calendar_bp)
 
     @app.errorhandler(404)
     def not_found(e):

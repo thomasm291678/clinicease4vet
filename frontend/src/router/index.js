@@ -52,7 +52,19 @@ const routes = [
         path: 'ai',
         name: 'AI',
         component: () => import('../views/AI.vue'),
-        meta: { title: 'AI 语音工作台' },
+        meta: { title: 'AI 工作台' },
+      },
+      {
+        path: 'knowledge',
+        name: 'Knowledge',
+        component: () => import('../views/Knowledge.vue'),
+        meta: { title: '知识库' },
+      },
+      {
+        path: 'calendar',
+        name: 'Calendar',
+        component: () => import('../views/Calendar.vue'),
+        meta: { title: '日程日历' },
       },
       {
         path: 'soap/:id?',

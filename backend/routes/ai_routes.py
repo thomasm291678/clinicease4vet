@@ -19,6 +19,7 @@ from config import Config
 from services.ai_parser import parse_medical_text_with_llm
 from services.deepseek_service import get_deepseek
 from services.funasr_service import transcribe_audio as funasr_transcribe
+from services.funasr_service import transcribe_and_parse as funasr_transcribe_and_parse
 from database.db import get_connection
 from auth.auth import token_required
 
@@ -56,6 +57,48 @@ def transcribe_audio_route():
         "elapsed": result.get("elapsed", 0),
         "audio_size": len(audio_data),
     }), 200
+
+
+# ========================
+# 统一语音处理端点（后端全链路：上传音频 → 转格式→降采样→转文字→AI解析）
+# ========================
+
+@ai_bp.route("/api/ai/voice/process", methods=["POST"])
+@token_required
+def voice_process():
+    """
+    一键语音处理：前端上传音频 → 后端完成全部转换和解析
+
+    前端只需:
+      1. 录音 (MediaRecorder, audio/webm)
+      2. POST /api/ai/voice/process 上传音频文件
+      3. 拿到 pet_form + medical_form + vaccine_form 直接录入
+
+    后端自动完成:
+      ffmpeg 格式转换 → 16kHz 降采样 → FunASR 转文字 → DeepSeek AI 解析
+    """
+    if "audio" not in request.files:
+        return jsonify({"error": "请上传音频文件"}), 400
+
+    audio_file = request.files["audio"]
+    if not audio_file.filename:
+        return jsonify({"error": "音频文件名为空"}), 400
+
+    audio_data = audio_file.read()
+    if len(audio_data) == 0:
+        return jsonify({"error": "音频数据为空"}), 400
+    if len(audio_data) > 200 * 1024 * 1024:
+        return jsonify({"error": "音频文件过大 (最大 200MB)"}), 413
+
+    try:
+        result = funasr_transcribe_and_parse(audio_data, audio_file.filename or "recording.webm")
+    except Exception as e:
+        return jsonify({"error": f"语音处理失败: {str(e)}"}), 500
+
+    if result.get("error"):
+        return jsonify({"error": result["error"], "text": result.get("text", "")}), 500
+
+    return jsonify(result), 200
 
 
 @ai_bp.route("/api/ai/transcribe-and-fill", methods=["POST"])
@@ -404,6 +447,10 @@ def engine_status():
             "grpo_self_verify": True,
             "drug_safety_check": True,
             "differential_with_evidence": True,
+            "image_analysis": True,
+            "guided_diagnosis": True,
+            "ai_triage": True,
+            "knowledge_base": True,
         },
         **kb_status,
     }), 200
@@ -772,3 +819,211 @@ def vet_search_context():
         return jsonify({"context": context, "query": query}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ========================
+# 影像分析 (DeepSeek Vision)
+# ========================
+
+@ai_bp.route("/api/ai/image/analyze", methods=["POST"])
+@token_required
+def image_analyze():
+    """
+    DR/X光/CT/MRI/B超 影像 AI 分析
+
+    请求:
+      - image: 图片文件 (multipart/form-data) 或 JSON { image_base64, image_type, species, context }
+    """
+    import base64
+
+    image_base64 = None
+    image_type = "xray"
+    species = "狗"
+    context = ""
+
+    if request.is_json:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "请求体不能为空"}), 400
+        image_base64 = (data.get("image_base64") or data.get("image") or "").strip()
+        image_type = data.get("image_type", "xray")
+        species = (data.get("species") or "狗").strip()
+        context = (data.get("context") or "").strip()
+    elif "image" in request.files:
+        image_file = request.files["image"]
+        if not image_file or not image_file.filename:
+            return jsonify({"error": "请上传影像文件"}), 400
+
+        image_data = image_file.read()
+        if len(image_data) == 0:
+            return jsonify({"error": "影像数据为空"}), 400
+        if len(image_data) > 20 * 1024 * 1024:
+            return jsonify({"error": "图片文件过大 (最大 20MB)"}), 413
+
+        image_base64 = base64.b64encode(image_data).decode("utf-8")
+        image_type = request.form.get("image_type", "xray")
+        species = (request.form.get("species") or "狗").strip()
+        context = (request.form.get("context") or "").strip()
+    else:
+        return jsonify({"error": "请上传影像文件或提供 base64 数据"}), 400
+
+    if not image_base64:
+        return jsonify({"error": "影像数据为空"}), 400
+
+    valid_types = ("xray", "ct", "mri", "ultrasound")
+    if image_type not in valid_types:
+        return jsonify({"error": f"不支持的影像类型: {image_type}，支持: {', '.join(valid_types)}"}), 400
+
+    ds = get_deepseek()
+    if not ds.is_configured():
+        return jsonify({"error": "DeepSeek API 未配置"}), 503
+
+    try:
+        result = ds.analyze_image(image_base64, image_type=image_type, species=species, context=context)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": f"影像分析失败: {str(e)}"}), 500
+
+
+# ========================
+# 引导式诊断工作流
+# ========================
+
+@ai_bp.route("/api/ai/diagnosis/guided", methods=["POST"])
+@token_required
+def guided_diagnosis():
+    """
+    标准化引导式诊断工作流
+
+    输入: 主诉/症状 + 已有信息 → 输出: 问诊引导 → 检查推荐 → 诊断建议
+
+    请求:
+      {
+        "chief_complaint": "主诉",
+        "species": "狗",
+        "breed": "品种",
+        "age": "年龄",
+        "gender": "性别",
+        "known_info": { ... 已知信息 },
+        "step": "history|exam|tests|diagnosis"  // 当前步骤
+      }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "请求体不能为空"}), 400
+
+    chief_complaint = (data.get("chief_complaint") or data.get("symptoms") or "").strip()
+    if not chief_complaint:
+        return jsonify({"error": "请提供主诉或症状描述"}), 400
+
+    species = (data.get("species") or "狗").strip()
+    breed = (data.get("breed") or "未知").strip()
+    age = (data.get("age") or "未知").strip()
+    gender = (data.get("gender") or "未知").strip()
+    known_info = data.get("known_info", {})
+    step = data.get("step", "history")
+
+    ds = get_deepseek()
+    if not ds.is_configured():
+        return jsonify({"error": "DeepSeek API 未配置"}), 503
+
+    patient = f"{species}，{breed}，{age}，{gender}"
+    known_str = ""
+    if known_info:
+        for k, v in known_info.items():
+            known_str += f"- {k}: {v}\n"
+
+    if step == "history":
+        system_prompt = """你是资深兽医诊断专家。根据主诉和基本信息，引导兽医进行系统性的病史采集。
+
+请输出JSON：
+{
+  "step": "history",
+  "summary": "对当前问题的简要总结",
+  "differential_initial": ["最可能的3-5个初步鉴别诊断"],
+  "questions_to_ask": [
+    {"question": "问题内容", "category": "发病情况/饮食/排泄/行为/既往史/用药史", "importance": "必须/建议"},
+    ...
+  ],
+  "red_flags": ["需要警惕的危险信号"],
+  "next_step": "exam"
+}
+
+规则：
+- questions_to_ask 按重要性排序，最多8个问题
+- red_flags 列出需要立即关注的紧急情况
+- 考虑品种特异性疾病"""
+    elif step == "exam":
+        system_prompt = """你是资深兽医诊断专家。根据已采集的病史，推荐体格检查和辅助检查项目。
+
+请输出JSON：
+{
+  "step": "exam",
+  "summary": "基于病史的检查方向",
+  "physical_exam": [
+    {"item": "检查项目", "focus": "重点关注什么", "importance": "必须/建议"}
+  ],
+  "lab_tests": [
+    {"test": "检查名称", "rationale": "为什么要做", "importance": "必须/建议"}
+  ],
+  "imaging": [
+    {"type": "DR/X光/CT/MRI/B超", "region": "部位", "rationale": "目的", "importance": "必须/建议"}
+  ],
+  "next_step": "diagnosis"
+}
+
+规则：
+- 检查项目按必要性排序
+- 标注每个检查的临床意义
+- 考虑成本效益，避免过度检查"""
+    elif step == "diagnosis":
+        system_prompt = """你是资深兽医诊断专家。综合全部临床信息，给出最终诊断和诊疗方案。
+
+请输出JSON：
+{
+  "step": "diagnosis",
+  "summary": "诊断总结",
+  "primary_diagnosis": {
+    "name": "主要诊断",
+    "confidence": 0-100,
+    "evidence_for": ["支持证据"],
+    "evidence_against": ["反对证据"]
+  },
+  "differential_diagnoses": [
+    {"name": "鉴别诊断", "likelihood": "高/中/低", "key_differentiators": "区分要点"}
+  ],
+  "must_not_miss": ["绝对不能漏诊的疾病"],
+  "treatment_plan": {
+    "immediate": "立即处理措施",
+    "medications": "药物方案",
+    "monitoring": "监测计划",
+    "follow_up": "复诊建议"
+  },
+  "prognosis": "预后评估",
+  "next_step": "complete"
+}
+
+规则：
+- 综合所有信息给出最优诊断
+- 列出排除某诊断的关键依据
+- treatment_plan 分立即处理和后续管理"""
+    else:
+        return jsonify({"error": f"不支持的步骤: {step}，支持: history, exam, diagnosis"}), 400
+
+    user_msg = f"患者信息：{patient}\n主诉：{chief_complaint}"
+    if known_str:
+        user_msg += f"\n\n已知信息：\n{known_str}"
+
+    result = ds._chat(system_prompt, user_msg)
+
+    if result.startswith("[API错误]"):
+        return jsonify({"error": result}), 500
+
+    parsed = ds._extract_json(result)
+    if parsed is None:
+        return jsonify({"error": "解析失败", "raw": result[:500]}), 500
+
+    parsed["species"] = species
+    parsed["chief_complaint"] = chief_complaint
+    parsed["engine"] = "deepseek"
+    return jsonify(parsed), 200

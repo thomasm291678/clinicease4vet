@@ -221,6 +221,131 @@ class DeepSeekAI:
             "engine": "deepseek",
         }
 
+    # ======================== 影像分析 ========================
+
+    def analyze_image(self, image_base64: str, image_type: str = "xray",
+                      species: str = "狗", context: str = "") -> dict:
+        """
+        使用 DeepSeek Vision 分析医学影像（DR/X光/CT/MRI）
+
+        Args:
+            image_base64: base64编码的图片（不含 data:image/... 前缀）
+            image_type: 影像类型 (xray, ct, mri, ultrasound)
+            species: 宠物种类
+            context: 额外临床上下文（症状、病史等）
+
+        Returns:
+            {
+                "findings": "影像所见",
+                "diagnosis": "诊断意见",
+                "differential": ["鉴别诊断1", ...],
+                "abnormalities": ["异常发现1", ...],
+                "confidence": 0-100,
+                "recommendations": "建议",
+            }
+        """
+        import base64
+
+        type_names = {
+            "xray": "DR/X光片",
+            "ct": "CT扫描",
+            "mri": "MRI核磁共振",
+            "ultrasound": "B超/超声",
+        }
+        type_name = type_names.get(image_type, "医学影像")
+
+        context_text = f"\n临床背景：{context}" if context else ""
+
+        system_prompt = f"""你是一名资深兽医影像学专家。请分析这张{species}的{type_name}影像。
+
+请严格按照以下JSON格式输出分析结果，不要输出任何其他内容：
+
+{{
+  "findings": "影像所见 - 详细描述影像中的关键发现，包括正常和异常结构",
+  "diagnosis": "诊断意见 - 根据影像给出的最可能诊断",
+  "differential": ["鉴别诊断1", "鉴别诊断2", "鉴别诊断3"],
+  "abnormalities": ["具体异常发现1", "具体异常发现2"],
+  "confidence": 0-100的整数，表示对诊断的置信度,
+  "recommendations": "建议 - 推荐的进一步检查或治疗方案",
+  "severity": "正常/轻度/中度/重度/危急"
+}}
+
+规则：
+- 使用标准兽医影像学术语
+- 鉴别诊断按可能性排序，最多5个
+- 如果影像质量不足以做出判断，在findings中说明
+- 对于DR/X光片，重点观察骨骼结构、心肺轮廓、腹腔脏器、软组织肿胀、骨折、关节病变等
+- 如果发现危急情况（如气胸、严重骨折、心脏显著增大等），severity标为"危急"并在recommendations中建议立即处理
+- 仅输出JSON，不要输出markdown代码块标记或其他内容"""
+
+        result = self._chat_vision(system_prompt, f"请分析这张{species}的{type_name}{context_text}", image_base64)
+
+        if result.startswith("[API错误]"):
+            return {"error": result, "engine": "deepseek_vision"}
+
+        parsed = self._extract_json(result)
+        if parsed is None:
+            return {"error": "分析结果解析失败", "raw": result[:500], "engine": "deepseek_vision"}
+
+        parsed["image_type"] = image_type
+        parsed["species"] = species
+        parsed["engine"] = "deepseek_vision"
+        return parsed
+
+    def _chat_vision(self, system_prompt: str, user_message: str, image_base64: str) -> str:
+        """调用 DeepSeek Vision API（支持图片输入）"""
+        import requests
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_message,
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            },
+                        },
+                    ],
+                },
+            ],
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "stream": False,
+        }
+
+        try:
+            resp = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            else:
+                error = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
+                return f"[API错误] {error}"
+        except requests.ConnectionError:
+            return "[API错误] 无法连接到 DeepSeek 服务"
+        except requests.Timeout:
+            return "[API错误] DeepSeek 请求超时"
+        except Exception as e:
+            return f"[API错误] {e}"
+
     # ======================== 工具方法 ========================
 
     def _extract_json(self, text: str):

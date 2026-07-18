@@ -49,24 +49,6 @@
       <div class="modal">
         <h3 class="modal-title">{{ editingRecord ? '编辑记录' : '添加诊疗记录' }}</h3>
 
-        <div class="ai-toolbar" v-if="!editingRecord">
-          <select v-model="aiTemplate" class="input template-select" @change="loadAITemplate">
-            <option value="">-- 病历模板 --</option>
-            <option v-for="t in aiTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </select>
-          <button class="btn btn-outline btn-sm" @click="showAiInput = !showAiInput">
-            {{ showAiInput ? '收起' : 'AI 智能填充' }}
-          </button>
-        </div>
-
-        <div v-if="showAiInput && !editingRecord" class="ai-fill-row">
-          <textarea v-model="aiFillText" class="input" rows="2" placeholder="粘贴一段描述文字，或语音录入，AI 自动填充全部字段..."></textarea>
-          <div class="ai-fill-actions">
-            <VoiceInput v-model="aiFillText" />
-            <button class="btn btn-primary btn-sm" @click="handleAiFill" :disabled="aiFilling">{{ aiFilling ? '解析中...' : 'AI 填充' }}</button>
-          </div>
-        </div>
-
         <form @submit.prevent="handleSave">
           <div class="inline-form">
             <div class="form-group">
@@ -75,18 +57,12 @@
             </div>
             <div class="form-group">
               <label>兽医</label>
-              <div style="display:flex;align-items:center;gap:4px;">
-                <input v-model="form.vet_name" class="input" />
-                <VoiceInput v-model="form.vet_name" size="sm" />
-              </div>
+              <input v-model="form.vet_name" class="input" />
             </div>
           </div>
           <div class="form-group">
             <label>症状 / 主诉</label>
-            <div style="display:flex;align-items:flex-start;gap:4px;">
-              <textarea v-model="form.symptoms" class="input" rows="2" placeholder="如：呕吐、腹泻、精神萎靡..."></textarea>
-              <VoiceInput v-model="form.symptoms" size="sm" />
-            </div>
+            <textarea v-model="form.symptoms" class="input" rows="2" placeholder="如：呕吐、腹泻、精神萎靡..."></textarea>
           </div>
           <div class="form-group">
             <label>就诊日期 *</label>
@@ -94,26 +70,11 @@
           </div>
           <div class="form-group">
             <label>诊断</label>
-            <div style="display:flex;align-items:flex-start;gap:4px;">
-              <textarea v-model="form.diagnosis" class="input" rows="2"></textarea>
-              <VoiceInput v-model="form.diagnosis" size="sm" />
-            </div>
+            <textarea v-model="form.diagnosis" class="input" rows="2"></textarea>
           </div>
           <div class="form-group">
             <label>治疗方案</label>
-            <div style="display:flex;align-items:flex-start;gap:4px;">
-              <textarea v-model="form.treatment" class="input" rows="2"></textarea>
-              <VoiceInput v-model="form.treatment" size="sm" />
-            </div>
-            <button
-              type="button"
-              class="btn btn-outline btn-sm"
-              @click="handleAiTreatment"
-              :disabled="generatingTreatment"
-              style="margin-top:6px;"
-            >
-              {{ generatingTreatment ? '生成中...' : 'AI 辅助治疗方案' }}
-            </button>
+            <textarea v-model="form.treatment" class="input" rows="2"></textarea>
           </div>
           <div class="inline-form">
             <div class="form-group">
@@ -142,12 +103,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
-import { getMedicalRecords, createMedicalRecord, updateMedicalRecord, deleteMedicalRecord, aiAutoFill, aiGetTemplates, aiGetTemplateDetail, aiGenerateTreatment } from '../api'
-import { useAiVoiceStore } from '../stores/aiVoice'
-
-const aiVoice = useAiVoiceStore()
-import VoiceInput from '../components/VoiceInput.vue'
+import { ref, reactive, onMounted } from 'vue'
+import { getMedicalRecords, createMedicalRecord, updateMedicalRecord, deleteMedicalRecord } from '../api'
 
 const records = ref([])
 const loading = ref(false)
@@ -155,13 +112,6 @@ const showModal = ref(false)
 const editingRecord = ref(null)
 const saving = ref(false)
 const toast = reactive({ show: false, msg: '', type: 'success' })
-
-const showAiInput = ref(false)
-const aiFillText = ref('')
-const aiFilling = ref(false)
-const aiTemplate = ref('')
-const aiTemplates = ref([])
-const generatingTreatment = ref(false)
 
 const form = reactive({
   pet_id: null, vet_name: '', visit_date: '', diagnosis: '',
@@ -193,26 +143,6 @@ async function fetchRecords() {
 function openCreate() {
   editingRecord.value = null
   resetForm()
-  showAiInput.value = false
-  aiFillText.value = ''
-  aiTemplate.value = ''
-
-  const prefill = localStorage.getItem('ai_prefill_medical')
-  if (prefill) {
-    try {
-      const mf = JSON.parse(prefill)
-      if (mf.diagnosis) form.diagnosis = mf.diagnosis
-      if (mf.treatment) form.treatment = mf.treatment
-      if (mf.symptoms) form.symptoms = mf.symptoms
-      if (mf.notes) form.notes = mf.notes
-      if (mf.fee_charged) form.fee_charged = mf.fee_charged
-      if (mf.vet_name) form.vet_name = mf.vet_name
-      if (mf.visit_date) form.visit_date = mf.visit_date
-      if (mf.follow_up_date) form.follow_up_date = mf.follow_up_date
-      localStorage.removeItem('ai_prefill_medical')
-    } catch (e) { /* ignore */ }
-  }
-
   showModal.value = true
 }
 
@@ -250,115 +180,6 @@ async function handleSave() {
   }
 }
 
-async function handleAiFill() {
-  if (!aiFillText.value.trim()) { showToast('请输入描述文字', 'error'); return }
-  aiFilling.value = true
-  try {
-    const res = await aiAutoFill(aiFillText.value, form.pet_id || null)
-    const fd = res.data?.form_data
-    if (fd) {
-      if (fd.diagnosis) form.diagnosis = fd.diagnosis
-      if (fd.treatment) form.treatment = fd.treatment
-      if (fd.symptoms) form.symptoms = fd.symptoms
-      if (fd.notes) form.notes = fd.notes
-      if (fd.fee_charged) form.fee_charged = fd.fee_charged
-      if (fd.vet_name) form.vet_name = fd.vet_name
-      if (fd.visit_date) form.visit_date = fd.visit_date
-      if (fd.follow_up_date) form.follow_up_date = fd.follow_up_date
-      if (fd.pet_id && !form.pet_id) form.pet_id = fd.pet_id
-    }
-    const vd = res.data?.vaccine_data
-    if (vd) {
-      localStorage.setItem('ai_prefill_vaccine', JSON.stringify(vd))
-    }
-    showToast('填充完成 (置信度: ' + (res.data?.confidence || 0) + '%)')
-  } catch (e) {
-    showToast(e.response?.data?.error || 'AI 填充失败', 'error')
-  } finally {
-    aiFilling.value = false
-  }
-}
-
-async function handleAiTreatment() {
-  if (!form.symptoms && !form.diagnosis) {
-    showToast('请先填写症状或诊断', 'error')
-    return
-  }
-  generatingTreatment.value = true
-  try {
-    const res = await aiGenerateTreatment({
-      symptoms: form.symptoms,
-      diagnosis: form.diagnosis,
-      species: '',
-    })
-    const treatment = res.data?.treatment
-    if (treatment) {
-      form.treatment = form.treatment
-        ? form.treatment + '\n\n--- AI 建议 ---\n' + treatment
-        : treatment
-      showToast('治疗方案已生成')
-    } else {
-      showToast('生成失败，请重试', 'error')
-    }
-  } catch (e) {
-    showToast(e.response?.data?.error || 'AI 生成失败', 'error')
-  } finally {
-    generatingTreatment.value = false
-  }
-}
-
-function cleanTemplateText(text) {
-  if (!text) return ''
-  return text.replace(/_{3,}/g, '\n').replace(/_{1,2}/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
-function extractSection(content, startKeyword, endKeywords = []) {
-  const lines = content.split('\n')
-  let startIdx = -1
-  let endIdx = lines.length
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (startIdx === -1 && line.includes(startKeyword)) {
-      startIdx = i + 1
-      continue
-    }
-    if (startIdx >= 0 && endKeywords.some(kw => line.includes(kw))) {
-      endIdx = i
-      break
-    }
-  }
-
-  if (startIdx === -1) return ''
-  const section = lines.slice(startIdx, endIdx).join('\n')
-  return cleanTemplateText(section)
-}
-
-async function loadAITemplate() {
-  if (!aiTemplate.value) return
-  try {
-    const res = await aiGetTemplateDetail(aiTemplate.value)
-    const content = res.data?.content
-    if (content) {
-      const diagnosisSection = extractSection(content, '诊断', ['七', '治疗', '八', '九'])
-        || extractSection(content, '六', ['七', '治疗'])
-      const symptomsSection = extractSection(content, '主诉', ['现病史', '四', '临床', '五'])
-        || extractSection(content, '三', ['四', '临床', '检查'])
-      const treatmentSection = extractSection(content, '治疗', ['八', '九', '十', '转归', '十一', '讨论'])
-        || extractSection(content, '七', ['八', '九', '十', '转归'])
-
-      if (diagnosisSection) form.diagnosis = diagnosisSection
-      if (symptomsSection) form.symptoms = symptomsSection
-      if (treatmentSection) form.treatment = treatmentSection
-
-      showToast('模板已分段填充（您可手动编辑）')
-    }
-    aiTemplate.value = ''
-  } catch (e) {
-    showToast('模板加载失败', 'error')
-  }
-}
-
 async function handleDelete(id) {
   if (!confirm('确定删除该记录？')) return
   try {
@@ -370,58 +191,12 @@ async function handleDelete(id) {
   }
 }
 
-onMounted(async () => {
-
-watch(() => aiVoice.lastResult, (result) => {
-  if (!result || !result.medicalInfo) return
-  const info = result.medicalInfo
-  openCreate()
-  if (info.diagnosis) form.diagnosis = info.diagnosis
-  if (info.treatment) form.treatment = info.treatment
-  if (info.symptoms) form.symptoms = info.symptoms
-  if (info.fee_charged || info.fee) form.fee_charged = info.fee_charged || info.fee
-  if (info.vet_name) form.vet_name = info.vet_name
-  if (info.visit_date) form.visit_date = info.visit_date
-  if (info.follow_up_date) form.follow_up_date = info.follow_up_date
-  if (result.petInfo?.name && !form.pet_id) {
-    // Try to find pet by name or create
-  }
-  aiVoice.consumeResult()
-}, { deep: true })
+onMounted(() => {
   fetchRecords()
-  try {
-    const res = await aiGetTemplates()
-    aiTemplates.value = res.data?.templates || []
-  } catch (e) { /* ignore */ }
 })
 </script>
 
 <style scoped>
 .page { max-width: 1100px; }
 .td-actions { display: flex; gap: 6px; }
-
-.ai-toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.template-select { width: 160px; }
-
-.ai-fill-row {
-  margin-bottom: 12px;
-  padding: 10px;
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: var(--radius);
-}
-
-.ai-fill-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-}
 </style>

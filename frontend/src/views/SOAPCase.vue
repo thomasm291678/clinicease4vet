@@ -211,6 +211,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   soapFromTranscript, soapGet, soapUpdate, soapReasoning, soapClientComm,
   aiTranscribe, aiGetTemplates, aiGetTemplateDetail, aiTranscribeAndFill,
+  aiSoapMultiAgent,
 } from '../api'
 import { useAiVoiceStore } from '../stores/aiVoice'
 
@@ -375,7 +376,7 @@ async function parseTranscriptText(text) {
   if (!text || !text.trim()) return
   aiBusy.value = true
   try {
-    const res = await soapFromTranscript({ transcript: text, species: '狗' })
+    const res = await aiSoapMultiAgent(text, '狗')
     fillFromAI(res.data)
     showToast('AI 解析完成，SOAP 表单已填充')
   } catch (e) {

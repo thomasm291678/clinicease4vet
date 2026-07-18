@@ -119,27 +119,32 @@ def update_record(record_id):
 
     data = request.get_json(silent=True) or {}
     try:
-        cursor.execute(
-            """UPDATE medical_records SET vet_name=%s, visit_date=%s, diagnosis=%s,
-               treatment=%s, symptoms=%s, subjective=%s, objective=%s,
-               assessment=%s, plan=%s, notes=%s, follow_up_date=%s, fee_charged=%s WHERE id=%s""",
-            (
-                data.get("vet_name", ""),
-                data.get("visit_date", ""),
-                data.get("diagnosis", ""),
-                data.get("treatment", ""),
-                data.get("symptoms", ""),
-                data.get("subjective", ""),
-                data.get("objective", ""),
-                data.get("assessment", data.get("diagnosis", "")),
-                data.get("plan", ""),
-                data.get("notes", ""),
-                data.get("follow_up_date") or None,
-                int(data.get("fee_charged", 0)),
-                record_id,
-            ),
-        )
-        conn.commit()
+        # 只更新提供的字段，不清空未传的字段
+        fields = []
+        values = []
+        field_map = {
+            "vet_name": "vet_name", "visit_date": "visit_date",
+            "diagnosis": "diagnosis", "treatment": "treatment",
+            "symptoms": "symptoms", "subjective": "subjective",
+            "objective": "objective", "assessment": "assessment",
+            "plan": "plan", "notes": "notes",
+            "follow_up_date": "follow_up_date", "fee_charged": "fee_charged",
+        }
+        for key, col in field_map.items():
+            if key in data:
+                fields.append(f"{col}=%s")
+                if key == "fee_charged":
+                    values.append(int(data[key] or 0))
+                else:
+                    values.append(data[key] if data[key] else None)
+
+        if fields:
+            values.append(record_id)
+            cursor.execute(
+                f"UPDATE medical_records SET {', '.join(fields)} WHERE id=%s",
+                tuple(values),
+            )
+            conn.commit()
     except Exception as e:
         conn.rollback()
         cursor.close()
@@ -162,6 +167,9 @@ def delete_record(record_id):
         cursor.close()
         conn.close()
         return jsonify({"error": "未找到该记录"}), 404
+
+    # 同步删除关联的日历事件
+    cursor.execute("DELETE FROM calendar_events WHERE medical_record_id = %s", (record_id,))
 
     cursor.execute("DELETE FROM medical_records WHERE id = %s", (record_id,))
     conn.commit()

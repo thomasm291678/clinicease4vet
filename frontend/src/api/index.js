@@ -168,6 +168,16 @@ export function aiTranscribe(audioBlob) {
   })
 }
 
+// 统一语音处理：上传音频 → 后端全链路（格式转换 + 降采样 + 转文字 + AI解析）
+export function aiVoiceProcess(audioBlob) {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'recording.webm')
+  return api.post('/ai/voice/process', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,  // 5分钟超时（包含 FunASR + DeepSeek）
+  })
+}
+
 export function aiGenerateTreatment({ symptoms, diagnosis, species }) {
   return api.post('/ai/generate-treatment', { symptoms, diagnosis, species })
 }
@@ -199,6 +209,98 @@ export function soapReasoning(recordId) {
 
 export function soapClientComm(recordId) {
   return api.post(`/soap/${recordId}/client`, {}, { timeout: 30000 })
+}
+
+// ============ Multi-Agent / GRPO / Drug Safety / Triage ============
+
+export function aiMultiAgentDiagnose(caseInfo, species, agents) {
+  return api.post('/ai/multi-agent/diagnose', { case_info: caseInfo, species, agents }, { timeout: 120000 })
+}
+
+export function aiGrpoVerify(caseInfo, species, nCandidates) {
+  return api.post('/ai/grpo/verify', { case_info: caseInfo, species, n_candidates: nCandidates }, { timeout: 120000 })
+}
+
+export function aiDrugSafety(drugName, species, weightKg) {
+  return api.post('/ai/drug/safety', { drug_name: drugName, species, weight_kg: weightKg })
+}
+
+export function aiTriage(caseInfo, species) {
+  return api.post('/ai/triage', { case_info: caseInfo, species }, { timeout: 60000 })
+}
+
+export function aiDifferentialEvidence(symptoms, diagnosis, species) {
+  return api.post('/ai/differential/evidence', { symptoms, diagnosis, species }, { timeout: 60000 })
+}
+
+// ============ 知识库 ============
+
+export function aiKbSearch(query, topK) {
+  return api.get('/ai/kb/search', { params: { q: query, top_k: topK || 5 } })
+}
+
+export function aiKbChat(question, species) {
+  return api.post('/ai/kb/chat', { question, species }, { timeout: 60000 })
+}
+
+export function aiKbStats() {
+  return api.get('/ai/kb/stats')
+}
+
+// ============ 影像分析 ============
+
+export function aiImageAnalyze(imageFile, imageType, species, context) {
+  const formData = new FormData()
+  formData.append('image', imageFile)
+  formData.append('image_type', imageType || 'xray')
+  formData.append('species', species || '狗')
+  if (context) formData.append('context', context)
+  return api.post('/ai/image/analyze', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  })
+}
+
+// ============ 引导式诊断 ============
+
+export function aiGuidedDiagnosis(data) {
+  return api.post('/ai/diagnosis/guided', data, { timeout: 120000 })
+}
+
+// ============ SOAP Multi-Agent / GRPO ============
+
+export function aiSoapMultiAgent(transcript, species) {
+  return api.post('/ai/soap/multi-agent', { transcript, species }, { timeout: 120000 })
+}
+
+export function aiSoapGrpo(transcript, species) {
+  return api.post('/ai/soap/grpo', { transcript, species }, { timeout: 180000 })
+}
+
+// ============ 日历 ============
+
+export function aiCalendarEvents(start, end) {
+  return api.get('/calendar/events', { params: { start, end } })
+}
+
+export function aiCalendarCreate(data) {
+  return api.post('/calendar/events', data)
+}
+
+export function aiCalendarUpdate(id, data) {
+  return api.put(`/calendar/events/${id}`, data)
+}
+
+export function aiCalendarDelete(id) {
+  return api.delete(`/calendar/events/${id}`)
+}
+
+export function aiCalendarToday() {
+  return api.get('/calendar/today')
+}
+
+export function aiCalendarSync() {
+  return api.post('/calendar/sync')
 }
 
 export default api
